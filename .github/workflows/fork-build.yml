@@ -1,0 +1,36 @@
+# Fork-only build: upstream msbuild.yml is disabled and pins the retired
+# windows-2019 image. Builds both arches with VS2022 (capemon-developer skill
+# recipe) and publishes them as a prerelease so they can be fetched without a token.
+name: Fork build
+
+on:
+  push:
+    branches: ['build/**']
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-2022
+    steps:
+    - uses: actions/checkout@v4
+
+    - uses: microsoft/setup-msbuild@v2
+
+    - name: Build Win32
+      run: msbuild /m /p:Configuration=Release /p:Platform=Win32 /p:WholeProgramOptimization=false capemon.sln
+
+    - name: Build x64
+      run: msbuild /m /p:Configuration=Release /p:Platform=x64 /p:WholeProgramOptimization=false capemon.sln
+
+    - name: Publish prerelease
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+      run: |
+        tag="build-${GITHUB_REF_NAME//\//-}-${GITHUB_SHA::8}"
+        sha256sum Release/capemon.dll x64/Release/capemon_x64.dll > SHA256SUMS
+        gh release create "$tag" Release/capemon.dll x64/Release/capemon_x64.dll SHA256SUMS \
+          --prerelease --target "$GITHUB_SHA" --title "$tag" \
+          --notes "Fork build of $GITHUB_REF_NAME at $GITHUB_SHA"
