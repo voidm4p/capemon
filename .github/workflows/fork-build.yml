@@ -1,0 +1,45 @@
+# Fork-only build: upstream msbuild.yml is disabled and pins the retired
+# windows-2019 image. Builds both arches with VS2022 (capemon-developer skill
+# recipe) and publishes them as a prerelease so they can be fetched without a token.
+name: Fork build
+
+on:
+  push:
+    branches: ['build/**']
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-2022
+    steps:
+    - uses: actions/checkout@v4
+
+    - uses: microsoft/setup-msbuild@v2
+
+    - name: Emit PDBs for Release (diagnostic builds)
+      shell: pwsh
+      run: (Get-Content capemon.vcxproj) -replace '<GenerateDebugInformation>false</GenerateDebugInformation>','<GenerateDebugInformation>true</GenerateDebugInformation>' | Set-Content capemon.vcxproj
+
+    - name: Build Win32
+      run: msbuild /m /p:Configuration=Release /p:Platform=Win32 /p:PlatformToolset=v143 /p:WholeProgramOptimization=false capemon.sln
+
+    - name: Build x64
+      run: msbuild /m /p:Configuration=Release /p:Platform=x64 /p:PlatformToolset=v143 /p:WholeProgramOptimization=false capemon.sln
+
+    - name: Publish prerelease
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+      run: |
+        tag="build-${GITHUB_REF_NAME//\//-}-${GITHUB_SHA::8}"
+        mkdir dist
+        cp Release/capemon.dll x64/Release/capemon_x64.dll dist/
+        for f in Release/*.pdb; do [ -f "$f" ] && cp "$f" "dist/x86_$(basename "$f")" || true; done
+        for f in x64/Release/*.pdb; do [ -f "$f" ] && cp "$f" "dist/x64_$(basename "$f")" || true; done
+        ls -la dist
+        (cd dist && sha256sum * > SHA256SUMS)
+        gh release create "$tag" dist/* \
+          --prerelease --target "$GITHUB_SHA" --title "$tag" \
+          --notes "Fork build of $GITHUB_REF_NAME at $GITHUB_SHA"
